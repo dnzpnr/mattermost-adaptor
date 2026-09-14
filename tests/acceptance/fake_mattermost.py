@@ -178,10 +178,10 @@ class FakeMattermost:
         with self.lock:
             self._seq += 1
             seq = self._seq
+            active = self._ws_active
         data = {"post": json.dumps(post), "channel_type": channel_type, "team_id": team_id}
         if sender_name is not None:
             data["sender_name"] = sender_name
-            active = self._ws_active
         if active is not None:  # bağlı istemci yoksa olay kaybolur; post replay ile bulunur
             active.put({"event": "posted", "data": data,
                         "broadcast": {"channel_id": post["channel_id"]}, "seq": seq})

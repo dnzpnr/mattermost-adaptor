@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mattermost-adapter"
+version = "0.1.0"
+description = "Standalone Mattermost transport adapter"
+requires-python = ">=3.11"
+dependencies = [
+  "mattermostdriver==7.3.2",
+  "websockets==17.1",
+]
+
+[project.scripts]
+mattermost-adapter = "mattermost_adapter.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
