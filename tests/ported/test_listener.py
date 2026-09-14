@@ -140,6 +140,34 @@ def test_replay_after_cursor_is_chronological_and_deduplicated(tmp_path):
     assert store.get_last_post_id("c1") == "p2"
 
 
+def test_replay_skips_invalid_create_at_and_keeps_worker_alive(tmp_path, capsys):
+    items = [
+        post("bad-time", "not-a-number", message="invalid"),
+        post("valid-time", 2, message="still delivered"),
+    ]
+    instance, _, store, handler = listener(tmp_path, items=items)
+    store.initialize_cursor("c1", "", 0)
+
+    async def scenario():
+        worker = await instance.start_session()
+        await instance.handle_event('{"event":"hello","seq":0}')
+        assert instance._replay_completed is not None
+        await instance._replay_completed.wait()
+        assert not worker.done(), repr(worker.exception() if worker.done() else None)
+        await instance.stop_intake()
+        await instance.drain_session()
+
+    run(scenario())
+
+    assert [call[0] for call in handler.calls] == ["valid-time"]
+    assert store.is_post_processed("valid-time")
+    assert not store.is_post_processed("bad-time")
+    stderr = capsys.readouterr().err
+    assert '"level":"WARNING"' in stderr
+    assert '"event":"invalid post skipped"' in stderr
+    assert '"message_id":"bad-time"' in stderr
+
+
 def test_cursor_is_initialized_before_websocket_and_gap_is_replayed(tmp_path):
     instance, posts, store, handler = listener(tmp_path)
     instance.initialize_replay_cursors()

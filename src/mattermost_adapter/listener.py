@@ -21,6 +21,13 @@ class MessageHandler(Protocol):
                        correlation_id: str) -> None | Awaitable[None]: ...
 
 
+def _parse_create_at(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
 class MattermostListener:
     REPLAY_LIMIT = 100
     DEFAULT_QUEUE_CAPACITY = 50
@@ -201,7 +208,8 @@ class MattermostListener:
             return
         started = time.perf_counter()
         await self._run_blocking(self.state_store.mark_post_processed,
-                                 str(post["channel_id"]), str(post["id"]), int(post.get("create_at") or 0))
+                                 str(post["channel_id"]), str(post["id"]),
+                                 _parse_create_at(post.get("create_at")))
         log("SQLite post yazimi tamamlandi", channel_id=str(post["channel_id"]),
             message_id=str(post["id"]), duration_ms=round((time.perf_counter() - started) * 1000))
 
@@ -279,7 +287,8 @@ class MattermostListener:
     def _sort_posts(response: dict[str, Any]) -> list[dict[str, Any]]:
         posts = response.get("posts") or {}
         selected = [posts[post_id] for post_id in response.get("order") or [] if post_id in posts]
-        return sorted(selected, key=lambda post: (int(post.get("create_at") or 0), str(post.get("id") or "")))
+        return sorted(selected, key=lambda post: (_parse_create_at(post.get("create_at")),
+                                                  str(post.get("id") or "")))
 
     def _get_replay_posts(self, channel_id: str, *, params: dict[str, Any]) -> dict[str, Any]:
         started = time.perf_counter()
@@ -346,7 +355,7 @@ class MattermostListener:
             newest = self._sort_posts(response)
             post = newest[-1] if newest else None
             self.state_store.initialize_cursor(channel_id, str(post["id"]) if post else "",
-                                               int(post.get("create_at") or 0) if post else 0)
+                                               _parse_create_at(post.get("create_at")) if post else 0)
             log("replay cursor'u websocket oncesi baslatildi", channel_id=channel_id,
                 message_id=str(post["id"]) if post else None)
 
