@@ -347,6 +347,24 @@ def test_invalid_websocket_json_is_silently_ignored(tmp_path):
     assert handler.calls == []
 
 
+def test_invalid_normalized_post_does_not_kill_worker_or_advance_state(tmp_path, capsys):
+    instance, _, store, handler = listener(tmp_path)
+    invalid = post("invalid-time", "not-a-number")
+    valid = post("valid-after-invalid", 2, message="still delivered")
+
+    run(run_session(instance, event(invalid), event(valid)))
+
+    assert [call[0] for call in handler.calls] == ["valid-after-invalid"]
+    assert not store.is_post_processed("invalid-time")
+    assert store.is_post_processed("valid-after-invalid")
+    records = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
+    warning = next(record for record in records if record["event"] == "invalid post skipped")
+    assert warning["level"] == "WARNING"
+    assert warning["channel_id"] == "c1"
+    assert warning["thread_id"] == "invalid-time"
+    assert warning["message_id"] == "invalid-time"
+
+
 def test_file_only_post_reaches_generic_handler(tmp_path):
     instance, _, _, handler = listener(tmp_path, state=False)
     item = post("file", 1, message="")

@@ -3,12 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import traceback
 from typing import Any
 
 from .api import MattermostAdapter
 from .config import AdapterConfig
 from .errors import AdapterError, InvalidInputError, UsageError
-from .logging import configure, redact
+from .logging import configure, log, redact
 from .models import NormalizedMessage, Session
 from .state import SqliteStateStore
 
@@ -98,7 +99,13 @@ def main(argv: list[str] | None = None) -> int:
         return exc.exit_code
     except KeyboardInterrupt:
         return 0
-    except BaseException as exc:
+    except Exception as exc:
+        log(
+            "unexpected CLI error",
+            level="ERROR",
+            error_type=type(exc).__name__,
+            traceback=traceback.format_exc(),
+        )
         error = AdapterError(f"Internal adapter error: {type(exc).__name__}")
         if listen:
             print(json.dumps({"type": "error", "error": {"code": error.code,

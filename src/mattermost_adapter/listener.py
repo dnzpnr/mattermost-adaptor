@@ -4,10 +4,10 @@ import asyncio
 import inspect
 import json
 import math
-import threading
 import time
 from typing import Any, Awaitable, Protocol
 
+from .errors import InvalidInputError
 from .logging import correlation_id, log, new_correlation_id
 from .models import ConversationRef, NormalizationResult, NormalizedMessage, Session
 from .normalize import normalize_post
@@ -50,7 +50,6 @@ class MattermostListener:
         self._replay_active = False
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stop_event: asyncio.Event | None = None
-        self._loop_thread_id: int | None = None
 
     async def start_session(self) -> asyncio.Task[None]:
         if self._worker_task is not None:
@@ -237,7 +236,20 @@ class MattermostListener:
                     message_id=post_id, session_id=None, branch=branch)
                 await self._mark_processed(post)
                 return False
-            message = normalize_post(post, event_data)
+            try:
+                message = normalize_post(post, event_data)
+            except InvalidInputError as exc:
+                branch = "invalid_post"
+                log(
+                    "invalid post skipped",
+                    level="WARNING",
+                    channel_id=channel_id,
+                    thread_id=thread_id,
+                    message_id=post_id,
+                    session_id=None,
+                    error=str(exc),
+                )
+                return False
             ref = ConversationRef(provider="mattermost", channel_id=message.channel_id, thread_id=message.thread_id)
             session = await self._resolve(ref)
             if session is None:
@@ -375,10 +387,7 @@ class MattermostListener:
 
     def request_stop(self) -> None:
         if self._loop is not None and self._stop_event is not None:
-            if threading.get_ident() == self._loop_thread_id:
-                self._stop_event.set()
-            else:
-                self._loop.call_soon_threadsafe(self._stop_event.set)
+            self._loop.call_soon_threadsafe(self._stop_event.set)
 
     def run_forever(self, websocket_cls=None) -> None:
         self.initialize_replay_cursors()
@@ -388,22 +397,12 @@ class MattermostListener:
         self.driver.websocket = websocket_cls(self.driver.options, self.driver.client.token)
         loop = asyncio.new_event_loop()
         self._loop = loop
-        self._loop_thread_id = threading.get_ident()
         self._stop_event = asyncio.Event()
         try:
             asyncio.set_event_loop(loop)
             loop.run_until_complete(self._run_websocket_connection(self.driver.websocket, self._stop_event))
         finally:
             self._loop = None
-            self._loop_thread_id = None
             self._stop_event = None
             loop.close()
             asyncio.set_event_loop(None)
-
-    # Source-name aliases are intentionally tiny and aid behavior-port review.
-    oturumu_baslat = start_session
-    intake_durdur = stop_intake
-    oturumu_drain_et = drain_session
-    kacirilan_mesajlari_telafi_et = replay_missed_messages
-    replay_cursorlarini_baslat = initialize_replay_cursors
-    _websocket_baglantisini_calistir = _run_websocket_connection

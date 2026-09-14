@@ -5,6 +5,7 @@ import json
 import logging as std_logging
 import os
 import ssl
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -136,15 +137,25 @@ class SingleConnectionWebsocket(Websocket):
                 heartbeat_at = now + self._watchdog_heartbeat_interval
             expected = now + self.WATCHDOG_INTERVAL_SECONDS
 
-    # Compatibility names make the one-to-one port mechanically auditable.
-    _olay_adi = _event_name
-    _recv_boslugunu_olcen_handler = _recv_gap_measuring_handler
+    async def _start_loop(self, websocket, event_handler):
+        """Receive with a heartbeat timeout without cancelling the handler.
 
-    async def _olay_dongusu_lag_watchdog(self, *, uyku=asyncio.sleep, saat=None):
-        return await self._event_loop_lag_watchdog(sleep=uyku, clock=saat)
+        Once ``recv`` returns, the event belongs to the adapter. Backpressure
+        in ``event_handler`` must therefore be allowed to take as long as the
+        queue requires instead of being cancelled by the receive timeout.
+        """
+        while self._alive:
+            try:
+                raw_message = await asyncio.wait_for(
+                    websocket.recv(), timeout=self.options["timeout"]
+                )
+            except asyncio.TimeoutError:
+                await websocket.pong()
+                continue
+            await event_handler(raw_message)
 
     async def connect(self, event_handler):
-        context = ssl.create_default_context(purpose=ssl.Purpose.CLIENT_AUTH)
+        context = ssl.create_default_context()
         if not self.options["verify"]:
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
@@ -191,13 +202,16 @@ class MattermostTransport:
         body = {"channel_id": message.channel_id, "message": message.text,
                 "root_id": message.thread_id or "", "props": props}
         started = time.perf_counter()
+        result = None
         try:
             result = self.driver.posts.create_post(body)
         except Exception as exc:
             raise translate_mattermost_error(exc) from exc
         finally:
             log("Mattermost REST create_post cagrisi tamamlandi", channel_id=message.channel_id,
-                thread_id=message.thread_id, message_id=message.reply_to_message_id,
+                thread_id=message.thread_id,
+                message_id=str(result.get("id") or "") if result else None,
+                reply_to_message_id=message.reply_to_message_id,
                 duration_ms=round((time.perf_counter() - started) * 1000))
         return SentMessage(message_id=str(result.get("id") or ""),
                            channel_id=str(result.get("channel_id") or message.channel_id),
@@ -240,7 +254,7 @@ class MattermostTransport:
 
 
 def run_with_reconnect(config: AdapterConfig, listener_factory: Callable[[MattermostTransport], Any],
-                       *, sleep: Callable[[float], None] = time.sleep,
+                       *, sleep: Callable[[float], None] | None = None,
                        stop_requested: Callable[[], bool] = lambda: False) -> None:
     delay = INITIAL_RECONNECT_DELAY
     attempt = 0
@@ -270,5 +284,24 @@ def run_with_reconnect(config: AdapterConfig, listener_factory: Callable[[Matter
         if listener is not None and listener.websocket_connected:
             delay = INITIAL_RECONNECT_DELAY
         log("reconnect scheduled", delay_seconds=delay)
-        sleep(delay)
+        if sleep is not None:
+            # Tests and embedding callers can retain deterministic virtual
+            # time by supplying the original injection point.
+            sleep(delay)
+        else:
+            owner = getattr(stop_requested, "__self__", None)
+            wait = getattr(owner, "wait", None)
+            if isinstance(owner, threading.Event) and callable(wait):
+                wait(delay)
+            else:
+                # Support arbitrary stop predicates while bounding shutdown
+                # latency. Event-backed production use takes the exact path
+                # above and wakes immediately.
+                deadline = time.monotonic() + delay
+                waiter = threading.Event()
+                while not stop_requested():
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    waiter.wait(min(remaining, 0.05))
         delay = min(delay * 2, MAX_RECONNECT_DELAY)

@@ -54,7 +54,8 @@ def test_create_post_body_preserves_props_and_configurable_reply_key(capsys):
     log_line = capsys.readouterr().err
     assert '"event":"Mattermost REST create_post cagrisi tamamlandi"' in log_line
     assert '"channel_id":"c"' in log_line and '"thread_id":"root"' in log_line
-    assert '"message_id":"reply"' in log_line and '"duration_ms":' in log_line
+    assert '"message_id":"sent"' in log_line
+    assert '"reply_to_message_id":"reply"' in log_line and '"duration_ms":' in log_line
 
 
 def test_watchdog_threshold_and_receive_gap_emit_structured_events(capsys, monkeypatch):

@@ -162,6 +162,7 @@ for line in listener.stdout:
 
 ## Teknik borç
 
+- MindAlert kaynağındaki `mattermost_bot/run.py`, TLS context'ini sunucu amacıyla kuruyor; ayrıca miras alınan driver döngüsü receive timeout'una event handler süresini de katıyor. Bu iki hata yalnız bu adapter içinde düzeltildi: TLS istemci context'i kullanılıyor ve timeout yalnız `websocket.recv()` çağrısını kapsıyor.
 - Replay kanal başına 100 post ile sınırlıdır; taşan eski postlar uyarı loguyla atlanır ve ayrı bir arşiv kurtarma aracı yoktur.
 - SQLite tek süreçli CLI modeli için tasarlanmıştır; çoklu listener süreçleri için sahiplik kilidi bulunmaz.
 - Senkron `MessageHandler` ve durum/REST işleri `asyncio.to_thread` ile çalışır. Python thread'leri zorla iptal edilemediğinden deadline aşımı yalnız uyarı üretir; reconnect gerçek drain bitene kadar bekler.
