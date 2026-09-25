@@ -218,6 +218,13 @@ class MattermostTransport:
                            thread_id=str(result.get("root_id") or result.get("id") or message.thread_id or "") or None,
                            create_at=result.get("create_at"))
 
+    def get_posts_for_channel(self, channel_id: str, *, per_page: int) -> dict[str, Any]:
+        try:
+            return self.driver.posts.get_posts_for_channel(
+                channel_id, params={"page": 0, "per_page": per_page})
+        except Exception as exc:
+            raise translate_mattermost_error(exc) from exc
+
     def get_file_info(self, file_id: str) -> dict[str, Any]:
         try:
             return self.driver.files.get_file_metadata(file_id)

@@ -8,7 +8,7 @@ from .config import AdapterConfig
 from .errors import InvalidInputError
 from .listener import MattermostListener, MessageHandler
 from .logging import configure, correlation_id, new_correlation_id
-from .models import ConversationRef, NormalizationResult, OutboundMessage
+from .models import ConversationRef, FoundMessage, NormalizationResult, OutboundMessage
 from .normalize import normalize_post, parse_event
 from .session import SessionResolver, ThreadSessionResolver
 from .state import StateStore
@@ -16,6 +16,10 @@ from .transport import MattermostTransport, build_driver, run_with_reconnect
 
 
 class MattermostAdapter:
+    DEFAULT_FIND_LIMIT = 200
+    MAX_FIND_LIMIT = 200
+    DEFAULT_FIND_PROP = "client_key"
+
     def __init__(self, config: AdapterConfig | None = None, *,
                  resolver: SessionResolver | None = None,
                  state_store: StateStore | None = None,
@@ -79,6 +83,46 @@ class MattermostAdapter:
                 reply_to_message_id=reply_to, props=props))
         finally:
             correlation_id.reset(token)
+
+    def find_message(self, payload: Any) -> FoundMessage:
+        if not isinstance(payload, dict):
+            raise InvalidInputError("Input must be a JSON object")
+        channel_id = payload.get("channel_id")
+        key = payload.get("key")
+        if not isinstance(channel_id, str) or not channel_id.strip():
+            raise InvalidInputError("channel_id must be a non-empty string")
+        if not isinstance(key, str) or not key.strip():
+            raise InvalidInputError("key must be a non-empty string")
+        prop = payload.get("prop", self.DEFAULT_FIND_PROP)
+        if not isinstance(prop, str) or not prop.strip():
+            raise InvalidInputError("prop must be a non-empty string")
+        limit = payload.get("limit", self.DEFAULT_FIND_LIMIT)
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            raise InvalidInputError("limit must be a positive integer")
+        limit = min(limit, self.MAX_FIND_LIMIT)
+        trace_id = new_correlation_id()
+        token = correlation_id.set(trace_id)
+        try:
+            response = self._get_transport().get_posts_for_channel(channel_id, per_page=limit)
+        finally:
+            correlation_id.reset(token)
+        posts = response.get("posts") if isinstance(response, dict) else None
+        order = response.get("order") if isinstance(response, dict) else None
+        posts = posts if isinstance(posts, dict) else {}
+        for post_id in order or []:
+            post = posts.get(post_id)
+            if not isinstance(post, dict) or post.get("channel_id") != channel_id:
+                continue
+            props = post.get("props")
+            if isinstance(props, dict) and props.get(prop) == key:
+                return FoundMessage(
+                    found=True,
+                    message_id=str(post.get("id") or post_id),
+                    channel_id=channel_id,
+                    thread_id=str(post.get("root_id") or post.get("id") or post_id) or None,
+                    create_at=post.get("create_at"),
+                )
+        return FoundMessage(found=False)
 
     def fetch_file(self, file_id: str, output_dir: str):
         if not file_id:

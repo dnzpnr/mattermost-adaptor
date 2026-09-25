@@ -126,14 +126,18 @@ class FakeMattermost:
                 with fake.lock:
                     fake.created_posts.append(body)
                     post_id = f"created-{len(fake.created_posts)}"
-                return self._json(201, {
+                created = {
                     "id": post_id,
                     "channel_id": body.get("channel_id"),
                     "root_id": body.get("root_id", ""),
                     "message": body.get("message"),
                     "create_at": 1789380000123,
                     "props": body.get("props") or {},
-                })
+                }
+                # Gerçek Mattermost'ta oluşturulan post kanalın post listesinde
+                # görünür; find-message'ın gönderim belirsizliğini çözmesi buna dayanır.
+                fake.add_offline_post(created)
+                return self._json(201, created)
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.server.daemon_threads = True

@@ -79,6 +79,18 @@ printf '%s\n' '{"channel_id":"c1","thread_id":"p1","text":"Yanıt","reply_to_mes
 {"status":"success","data":{"message_id":"new-post-id","channel_id":"c1","thread_id":"p1","create_at":1789380000123},"error":null}
 ```
 
+### `find-message`
+
+Bir gönderimin oluşup oluşmadığını kanalın son postlarında arar. İstemci `send-message` yanıtını alamadıysa (zaman aşımı, çökme) elinde mesaj kimliği yoktur; gönderimden önce `props` içine koyduğu kendi anahtarıyla postu bulur. stdin alanları: zorunlu `channel_id` ve `key`; isteğe bağlı `prop` (varsayılan `client_key`) ve `limit` (varsayılan ve üst sınır `200`). Bulunamamak hata değildir: zarf `success` ve `found: false` döner. Kanal kapsamı korunur; başka kanaldaki post sayılmaz.
+
+```sh
+printf '%s\n' '{"channel_id":"c1","key":"req-42"}' | mattermost-adapter find-message
+```
+
+```json
+{"status":"success","data":{"found":true,"message_id":"new-post-id","channel_id":"c1","thread_id":"p1","create_at":1789380000123},"error":null}
+```
+
 ### `fetch-file --file-id ID --output-dir DIR`
 
 Dosya adından dizin parçaları atılır. Aynı ad varsa mevcut dosyanın üzerine yazmak yerine `name (1).ext` kullanılır.
