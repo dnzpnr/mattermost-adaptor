@@ -93,6 +93,21 @@ class SentMessage:
 
 
 @dataclass(frozen=True)
+class FoundMessage:
+    found: bool
+    message_id: str | None = None
+    channel_id: str | None = None
+    thread_id: str | None = None
+    create_at: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        if not self.found:
+            return {"found": False}
+        return {"found": True, "message_id": self.message_id, "channel_id": self.channel_id,
+                "thread_id": self.thread_id, "create_at": self.create_at}
+
+
+@dataclass(frozen=True)
 class FileInfo:
     file_id: str
     name: str

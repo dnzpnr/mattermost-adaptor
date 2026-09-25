@@ -25,6 +25,7 @@ def _parser() -> argparse.ArgumentParser:
     normalize = commands.add_parser("normalize-event")
     normalize.add_argument("--bot-user-id")
     commands.add_parser("send-message")
+    commands.add_parser("find-message")
     fetch = commands.add_parser("fetch-file")
     fetch.add_argument("--file-id", required=True)
     fetch.add_argument("--output-dir", required=True)
@@ -73,6 +74,8 @@ def _run(args: argparse.Namespace) -> None:
     )
     if args.command == "send-message":
         _write_envelope(data=adapter.send_message(_read_json()).to_dict())
+    elif args.command == "find-message":
+        _write_envelope(data=adapter.find_message(_read_json()).to_dict())
     elif args.command == "fetch-file":
         _write_envelope(data=adapter.fetch_file(args.file_id, args.output_dir).to_dict())
     elif args.command == "health":
