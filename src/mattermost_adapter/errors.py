@@ -46,3 +46,8 @@ class AuthError(AdapterError):
 class MattermostAPIError(AdapterError):
     code = "MATTERMOST_API_ERROR"
     exit_code = 5
+
+
+class AlreadyRunningError(AdapterError):
+    code = "ALREADY_RUNNING"
+    exit_code = 6

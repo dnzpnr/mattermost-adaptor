@@ -23,6 +23,7 @@ Temel bağlantı değişkenleri `MM_URL`, `MM_PORT`, `MM_SCHEME` ve `MM_TOKEN`'d
 - `MM_ADAPTER_CHANNELS` (replay yapılacak virgülle ayrılmış kanal kimlikleri)
 - `MM_ADAPTER_REPLY_PROP_KEY` (varsayılan `reply_to_post_id`)
 - `MM_ADAPTER_LOG_LEVEL` (varsayılan `INFO`)
+- `MM_ADAPTER_ACK` (varsayılan kapalı; `1` ise teslim onayı protokolü etkin)
 
 ## Dizin yapısı
 
@@ -119,6 +120,8 @@ mattermost-adapter health --check-connection
 
 Websocket'e bağlanır ve yalnız işlenecek mesajları stdout'a NDJSON olarak yazar. İlk cursor websocket açılmadan kurulur; sonraki bağlantılarda kanal başına en yeni 100 kaçırılmış post replay edilir. `SIGINT` ve `SIGTERM` yeni alımı durdurur, kabul edilmiş kuyruğu drain eder ve `0` ile çıkar.
 
+Aynı `MM_ADAPTER_STATE_PATH` üzerinde ikinci bir `listen` süreci ağa çıkmadan reddedilir (çıkış kodu `6`, `ALREADY_RUNNING`); kilit `fcntl.flock` `stdlib` dışında bağımlılık gerektirmez ve süreç ölünce (SIGKILL dahil) kendiliğinden düşer.
+
 ```sh
 MM_ADAPTER_CHANNELS=c1,c2 mattermost-adapter listen
 ```
@@ -126,6 +129,22 @@ MM_ADAPTER_CHANNELS=c1,c2 mattermost-adapter listen
 ```json
 {"type":"message","correlation_id":"17dbb27b-57dd-44f8-9cca-eca05e822d4c","data":{"action":"process","ignore_reason":null,"message":{"provider":"mattermost","channel_id":"c1","thread_id":"p1","message_id":"p2","parent_message_id":"p1","sender":{"id":"u2","display_name":"@ayse"},"content":"merhaba","attachments":[],"timestamp":"2026-09-14T10:00:00.000Z","raw_metadata":{"post_type":"","create_at":1789380000000,"channel_type":"O","team_id":"t1","props":{}}},"session":{"session_id":"mattermost:p1","attributes":{}}}}
 ```
+
+### Teslim onayı (`MM_ADAPTER_ACK=1`)
+
+Opt-in kip. Her `message` kaydına benzersiz bir `ack_id` eklenir (örn. `<post_id>:<create_at>`). Bu kipte replay/tekillik durumu (cursor) yalnız tüketici stdin'e ack satırı yazınca ilerler:
+
+```json
+{"ack":"p2:1789380000000"}
+```
+
+Bir ack, o mesaja ve ondan ÖNCE teslim edilmiş tüm mesajlara geçerlidir. Her ack stdout'a şunu yazar; bilinmeyen kimlik `ack_error` döner ve süreç düşmez:
+
+```json
+{"type":"ack","ack_id":"p2:1789380000000","status":"committed"}
+```
+
+Onaylanmayan mesajlar süreç yeniden başlayınca replay ile tekrar çıkar (en-az-bir-kez). Stdin'in kapanması (EOF) onaysız mesajları onaylanmış saymaz. Kip kapalıyken stdin okunmaz ve çıktı birebir eski biçimdedir.
 
 ## Plugin kullanımı
 
@@ -171,12 +190,11 @@ for line in listener.stdout:
 - `3`: `CONFIG_ERROR`
 - `4`: `AUTH_ERROR`
 - `5`: `MATTERMOST_API_ERROR`
+- `6`: `ALREADY_RUNNING`
 
 ## Teknik borç
 
 - MindAlert kaynağındaki `mattermost_bot/run.py`, TLS context'ini sunucu amacıyla kuruyor; ayrıca miras alınan driver döngüsü receive timeout'una event handler süresini de katıyor. Bu iki hata yalnız bu adapter içinde düzeltildi: TLS istemci context'i kullanılıyor ve timeout yalnız `websocket.recv()` çağrısını kapsıyor.
 - Replay kanal başına 100 post ile sınırlıdır; taşan eski postlar uyarı loguyla atlanır ve ayrı bir arşiv kurtarma aracı yoktur.
-- SQLite tek süreçli CLI modeli için tasarlanmıştır; çoklu listener süreçleri için sahiplik kilidi bulunmaz.
 - Senkron `MessageHandler` ve durum/REST işleri `asyncio.to_thread` ile çalışır. Python thread'leri zorla iptal edilemediğinden deadline aşımı yalnız uyarı üretir; reconnect gerçek drain bitene kadar bekler.
-- NDJSON akışı teslim onayı protokolü içermez. Handler satırı flush edildikten sonra cursor ilerler; tüketici satırı aldıktan hemen sonra çökerse uçtan uca exactly-once garanti edilmez.
 - Websocket ve REST için üçüncü taraf sürücü korunmuştur; sürücü sürüm yükseltmeleri protokol karakterizasyon testleriyle yeniden doğrulanmalıdır.

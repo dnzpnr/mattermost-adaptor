@@ -6,6 +6,7 @@ import sys
 import traceback
 from typing import Any
 
+from .ack import AckController, AckGatedStateStore
 from .api import MattermostAdapter
 from .config import AdapterConfig
 from .errors import AdapterError, InvalidInputError, UsageError
@@ -50,10 +51,18 @@ def _write_envelope(*, data=None, error: AdapterError | None = None) -> None:
 
 
 class _NDJSONHandler:
+    def __init__(self, ack_controller: AckController | None = None) -> None:
+        self._ack = ack_controller
+
     def handle_message(self, message: NormalizedMessage, session: Session, trace_id: str) -> None:
         result = {"action": "process", "ignore_reason": None,
                   "message": message.to_dict(), "session": session.to_dict()}
         line = {"type": "message", "correlation_id": trace_id, "data": result}
+        if self._ack is not None:
+            line["ack_id"] = self._ack.prepare(
+                message.channel_id, message.message_id, message.raw_metadata.get("create_at"))
+            self._ack.write_line(line)
+            return
         print(json.dumps(line, ensure_ascii=False, separators=(",", ":")), flush=True)
 
 
@@ -67,11 +76,14 @@ def _run(args: argparse.Namespace) -> None:
     else:
         config = AdapterConfig.from_env(require_token=True)
     configure(config.log_level, secrets=[config.token])
-    adapter = MattermostAdapter(
-        config,
-        state_store=(SqliteStateStore(config.state_path, config.channels)
-                     if args.command == "listen" else None),
-    )
+    state_store = None
+    ack_controller: AckController | None = None
+    if args.command == "listen":
+        state_store = SqliteStateStore(config.state_path, config.channels)
+        if config.ack_enabled:
+            ack_controller = AckController(state_store)
+            state_store = AckGatedStateStore(state_store, ack_controller)
+    adapter = MattermostAdapter(config, state_store=state_store)
     if args.command == "send-message":
         _write_envelope(data=adapter.send_message(_read_json()).to_dict())
     elif args.command == "find-message":
@@ -81,7 +93,13 @@ def _run(args: argparse.Namespace) -> None:
     elif args.command == "health":
         _write_envelope(data=adapter.health(check_connection=args.check_connection))
     elif args.command == "listen":
-        adapter.listen(_NDJSONHandler(), install_signal_handlers=True)
+        if ack_controller is not None:
+            ack_controller.start()
+        try:
+            adapter.listen(_NDJSONHandler(ack_controller), install_signal_handlers=True)
+        finally:
+            if ack_controller is not None:
+                ack_controller.stop()
     else:
         raise UsageError(f"unknown command: {args.command}")
 

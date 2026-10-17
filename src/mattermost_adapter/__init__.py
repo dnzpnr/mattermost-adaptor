@@ -1,6 +1,6 @@
 from .api import MattermostAdapter
 from .config import AdapterConfig
-from .errors import (AdapterError, AuthError, ConfigError, InvalidInputError,
+from .errors import (AdapterError, AlreadyRunningError, AuthError, ConfigError, InvalidInputError,
                      MattermostAPIError, UsageError)
 from .listener import MattermostListener, MessageHandler
 from .models import (Attachment, ConversationRef, FileInfo, NormalizationResult,
@@ -12,7 +12,7 @@ from .transport import (MattermostTransport, SingleConnectionWebsocket, build_dr
                         is_permanent_auth_error, run_with_reconnect)
 
 __all__ = [
-    "AdapterConfig", "AdapterError", "Attachment", "AuthError", "ConfigError",
+    "AdapterConfig", "AdapterError", "AlreadyRunningError", "Attachment", "AuthError", "ConfigError",
     "ConversationRef", "FileInfo", "InvalidInputError", "MattermostAPIError",
     "MattermostAdapter", "MattermostListener", "MattermostTransport", "MessageHandler",
     "NormalizationResult", "NormalizedMessage", "OutboundMessage", "Sender", "SentMessage",

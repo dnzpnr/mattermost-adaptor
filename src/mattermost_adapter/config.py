@@ -42,6 +42,10 @@ def _queue_capacity(env: Mapping[str, str]) -> int:
     return value
 
 
+def _ack_enabled(env: Mapping[str, str]) -> bool:
+    return str(env.get("MM_ADAPTER_ACK", "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _default_state_path(env: Mapping[str, str]) -> str:
     explicit = env.get("MM_ADAPTER_STATE_PATH")
     if explicit:
@@ -68,6 +72,7 @@ class AdapterConfig:
     channels: tuple[str, ...] = ()
     reply_prop_key: str = "reply_to_post_id"
     log_level: str = "INFO"
+    ack_enabled: bool = False
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None, *, require_token: bool = True) -> "AdapterConfig":
@@ -95,7 +100,7 @@ class AdapterConfig:
             queue_capacity=_queue_capacity(env),
             drain_deadline=_positive_float(env, "MM_BRIDGE_DRAIN_DEADLINE_SECONDS", 180.0),
             state_path=_default_state_path(env), channels=channels, reply_prop_key=reply_key,
-            log_level=level,
+            log_level=level, ack_enabled=_ack_enabled(env),
         )
 
     def __repr__(self) -> str:

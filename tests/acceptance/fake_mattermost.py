@@ -8,9 +8,11 @@ import hashlib
 import json
 import queue
 import re
+import select
 import socket
 import struct
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -40,6 +42,13 @@ def make_post(post_id, *, channel_id="c1", root_id="", user_id="u1", message="he
 
 
 class FakeMattermost:
+    # `ws_connected` yalnız el sıkışma tamamlandığında değil, istemcinin ilk
+    # telafi (replay) turunu bitirebilmesi için kısa bir bekleme sonrasında
+    # set edilir. Aksi halde bağlanır bağlanmaz requests sayan bir test, ilk
+    # sürecin kendi replay çağrısıyla yarışır.
+    WS_READY_GRACE_SECONDS = 0.3
+    WS_POLL_SECONDS = 0.05
+
     def __init__(self):
         self.lock = threading.Lock()
         self.channel_posts: dict[str, list[dict]] = {}
@@ -233,17 +242,32 @@ class FakeMattermost:
             own_queue: "queue.Queue[dict | None]" = queue.Queue()
             with self.lock:
                 retired, self._ws_active = self._ws_active, own_queue
-                self.ws_connected.set()
             if retired is not None:
                 retired.put(None)
+            # İstemciye telafi turunu bitirmesi için fırsat ver; sonra "hazır" ilan et.
+            time.sleep(self.WS_READY_GRACE_SECONDS)
+            with self.lock:
+                if self._ws_active is own_queue:
+                    self.ws_connected.set()
             while True:
-                try:
-                    event = own_queue.get(timeout=0.2)
-                except queue.Empty:
-                    continue
-                if event is None:
-                    return
-                _send_frame(sock, json.dumps(event))
+                # Eşzamanlı olarak soketi de izle: istemci ölürse (FIN/close)
+                # kilit ve ws_connected durumu kendiliğinden düşsün.
+                ready, _, _ = select.select([sock], [], [], self.WS_POLL_SECONDS)
+                if ready:
+                    try:
+                        chunk = sock.recv(65536)
+                    except OSError:
+                        return
+                    if not chunk or (chunk[0] & 0x0F) == 0x8:
+                        return
+                while True:
+                    try:
+                        event = own_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                    if event is None:
+                        return
+                    _send_frame(sock, json.dumps(event))
         except (OSError, ValueError, ConnectionError):
             return
         finally:

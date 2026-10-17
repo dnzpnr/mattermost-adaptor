@@ -7,6 +7,7 @@ from typing import Any
 from .config import AdapterConfig
 from .errors import InvalidInputError
 from .listener import MattermostListener, MessageHandler
+from .lock import acquire_listener_lock, release_listener_lock
 from .logging import configure, correlation_id, new_correlation_id
 from .models import ConversationRef, FoundMessage, NormalizationResult, OutboundMessage
 from .normalize import normalize_post, parse_event
@@ -154,9 +155,6 @@ class MattermostAdapter:
                 current[0].request_stop()
 
         previous = {}
-        if install_signal_handlers:
-            for signum in (signal.SIGINT, signal.SIGTERM):
-                previous[signum] = signal.signal(signum, request_stop)
 
         def factory(transport: MattermostTransport) -> MattermostListener:
             listener = MattermostListener(
@@ -167,9 +165,13 @@ class MattermostAdapter:
             current[0] = listener
             return listener
 
+        lock = acquire_listener_lock(self.config.state_path)
         try:
+            if install_signal_handlers:
+                for signum in (signal.SIGINT, signal.SIGTERM):
+                    previous[signum] = signal.signal(signum, request_stop)
             run_with_reconnect(self.config, factory, stop_requested=stopping.is_set)
         finally:
-            if install_signal_handlers:
-                for signum, old_handler in previous.items():
-                    signal.signal(signum, old_handler)
+            release_listener_lock(lock)
+            for signum, old_handler in previous.items():
+                signal.signal(signum, old_handler)
